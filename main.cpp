@@ -249,14 +249,14 @@ void testMST(int A[], int n, int rankn, int p, MPI_Comm comm)
 
 	for (int i=0; i < SIZEV; i++)
 	{
-		if (AM[i][j] >=  0 )
+		if (AM[i][0] >=  0 )
 		cout << " " << i << " -> " ;
 		for (int j=0; j < MAXV; j++)
 		{
 			if (AM[i][j]>=0)cout << AM[i][j] << " ";
 			if (AM[i][j] < 0 ) break;
 		}
-		if (AM[i][j] >=  0 )
+		if (AM[i][0] >=  0 )
 		cout << endl;
 	}
 	cout << endl;

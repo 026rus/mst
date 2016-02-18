@@ -18,30 +18,29 @@ using namespace std;
  * 
  */
 /*---------------------------------------------------------------------------*/
-#define SIZEV 640
-#define MAXV 100
+bool debug = false;
 /*---------------------------------------------------------------------------*/
-struct Edge
-{
-	int v1;
-	int v2;
-	int w;
-	int s;
-};
-/*---------------------------------------------------------------------------*/
-void readArr(int A[], int n, int rankn, int p, MPI_Comm comm);
-void writeArr(int A[], int n, int rankn, int p, MPI_Comm comm);
-void testPrintArr(int A[], int n, int rankn, int p, MPI_Comm comm);
-void testMST(int A[], int n, int rankn, int p, MPI_Comm comm);
-void printEdg(Edge* e, int n);
-
+int findp(int *subsets, int i);
+void Union(int * subsets, int x, int y, int &);
+void MST(int ** edge, int V, int E, int * &, int &,  int rankn, int p, MPI_Comm comm);
+void readArr(int** &A, int &V, int &E, int rankn, int p, MPI_Comm comm);
+void writeArr(int A[], int n);
+void flatit(int **&A, int * &Fl, int E);
+void unflatit(int *&A, int ** &,  int E);
+void ftf(int ** &A, int *&, int &, int &, int rankn, int p, MPI_Comm comm);
+void printA(int *A, int N);
 /*---------------------------------------------------------------------------*/
 
 int main(int argc, char** argv)
 { 
-	int rankn, p;
-	int *A;
-	int n = 14*4;
+	int rankn=0,
+		p=0;
+	int **A;
+	int * MSTarr;
+	int MSTcount;
+	int *Fl;
+	int V=0,
+		E=0;
 	MPI_Comm comm;
 	double start, finish;
 
@@ -50,231 +49,243 @@ int main(int argc, char** argv)
 	MPI_Comm_size(comm, &p);
 	MPI_Comm_rank(comm, &rankn);
 
-	A = new int[n];
-	readArr(A, n, rankn, p, comm);
-	
-	testPrintArr(A, n, rankn, p, comm);
+	if (!rankn)
+		readArr(A, V, E, rankn, p, comm);
 
 	start = MPI_Wtime();
-	testMST(A, n, rankn, p, comm);
-	finish = MPI_Wtime();
+
+	ftf(A, Fl, E, V ,rankn, p, comm);
 	
+ 	MST(A, V, E, MSTarr, MSTcount, rankn, p, comm);
+
+	finish = MPI_Wtime();
 	if (rankn == 0)
 		cout << "Run time: " << finish-start << " seconds";
- 
+	if (!rankn)
+		writeArr(MSTarr, MSTcount);
 	/////////////////////////////////	
-	delete[] A;
+/*
+	if (A != NULL)
+	{
+		for (int i=0; i<E; ++i)
+			delete[] A[i];
+		delete[] A;
+
+	}
+	*/
 	MPI_Finalize();
 	return 0;
 
 }
-
-void readArr(int A[], int n, int rankn, int p, MPI_Comm comm)
+/*************************************************************************************************/
+/* Sending array of edges to all procesors */
+void ftf(int **& A, int *& Fl, int &E, int &V, int rankn, int p, MPI_Comm comm)
 {
-	int *temp = NULL;
+	MPI_Bcast(&E, 1, MPI_INT, 0, comm);
+	MPI_Bcast(&V, 1, MPI_INT, 0, comm);
 
-	if (rankn == 0)
+	if(rankn)
+		Fl = new int[E*3];
+
+	if(rankn)
 	{
-		ifstream infile("graph.txt");
-		int N,
-			E;
-
-
-		if(!infile.is_open())
-			cout << "Cannot read file !!!" << endl;
-
-		infile >> N;
-		infile >> E;
-
-		temp = new int[ E*4 ];
-
-
-		for (int i = 0; i < E*4; i++)
-		{
-			infile >> temp[i++];
-			infile >> temp[i++];
-			infile >> temp[i++];
-			temp[i] = 2;
-
-		}
-		infile.close();
+		A = new int*[E];
+		for (int i=0; i< E; ++i)
+			A[i] = new int [3];
 	}
 	
-	MPI_Scatter(temp, n, MPI_INT, A, n, MPI_INT, 0, comm);
-	
-	if (rankn == 0)
-	   delete[] temp;
+	if (!rankn)
+		flatit(A, Fl, E);
+
+	MPI_Bcast(Fl, E*3, MPI_INT, 0, comm);
+
+	if(rankn)
+		unflatit(Fl, A, E);
+
+	MPI_Barrier(comm);
 }
-
-void writeArr(int A[], int n, int rankn, int p, MPI_Comm comm)
+/**************************************************************************************************/
+/* converting 2D arr in to 1D arr 
+ * to make brotcast esier
+ */
+void flatit(int **&A, int * & temp, int E)
 {
-	int* temp = NULL;
-	
-	if (rankn == 0)
-	{
-		ofstream outfile ("mst.txt");
-		if (outfile.is_open())
-		{
-			temp = new int[n];
+	temp = new int[E*3];
 
-			MPI_Gather(A, n, MPI_INT, temp, n, MPI_INT, 0, comm);
-			
-			for (int i = 0; i < n; i++)
-			{
-				outfile << temp[i] << " ";
-				outfile << temp[i++] << " ";
-				outfile << temp[i++] << endl;
-			}
-			
-			delete[] temp;
-			outfile.close();
-		}
-	}
-	else
+	int c=0;
+	for (int i=0; i< E*3; i+=3)
 	{
-		MPI_Gather(A, n, MPI_INT, temp, n, MPI_INT, 0, comm);
+		temp[i] 	=	A[c][0];
+		temp[i+1] 	=	A[c][1];
+		temp[i+2] 	=	A[c++][2];
 	}
-
 }
-
-void testPrintArr(int A[], int n, int rankn, int p, MPI_Comm comm)
+/**************************************************************************************************/
+/* Converting 1D array int to 2D  */
+void unflatit(int *&T, int ** &A, int E)
 {
-	int*       Temp;
-	MPI_Status status;
-	
-	if (rankn == 0)
+	int c=0;
+	for (int i=0; i< E; ++i)
 	{
-		Temp = new int[n];
-		cout << "N = " << n << endl;
-		cout << "Rank: " <<  rankn << endl ;
+		A[i][0] = 	T[c++];
+		A[i][1] =	T[c++];
+		A[i][2] =	T[c++];
+	}
+}
+/**************************************************************************************************/
+void writeArr(int A[], int n)
+{
+	ofstream outfile ("mst.txt");
+	if (outfile.is_open())
+	{
 		for (int i = 0; i < n; i++)
 		{
-			cout << "\t"<< A[i++] << " ";
-			cout << A[i++] << " ";
-			cout << A[i++] << " ";
-			cout << A[i] << endl;
-		}
-		cout << endl;
-	
-		
-		for (int j = 1; j < p; j++)
-		{
-			MPI_Recv(Temp, n, MPI_INT, j, 0, comm, &status);
-
-			cout << "Rank: " <<  j << endl << "\t";
-			for (int i = 0; i < n; i++)
-				cout << Temp[i] << " ";
-			cout << endl;
+			outfile << A[i++] << " - ";
+			outfile << A[i] << endl;
 		}
 		
-		delete[] Temp;
+		outfile.close();
 	}
-	else
-	{
-		MPI_Send(A, n, MPI_INT, 0, 0, comm);
-	}
-} 
 
-
-void testMST(int A[], int n, int rankn, int p, MPI_Comm comm)
+}
+/**************************************************************************************************/
+/* reading array from the file */
+void readArr(int** &A, int &V, int &E, int rankn, int p, MPI_Comm comm)
 {
-		
-	int AM[SIZEV][MAXV];
-	Edge* e = new Edge[n/4];
-	Edge* mste = new Edge[n/4];
 
-	for (int i=0; i < SIZEV; i++)
-		for (int j=0; j < MAXV; j++)
-			AM[i][j] = -1;
+	ifstream infile("graph.txt");
 
-	if (rankn == 0)
+
+	if(!infile.is_open())
+		cout << "Cannot read file !!!" << endl;
+
+	infile >> V;
+	infile >> E;
+
+	A = new int*[ E ];
+	for (int i=0; i < E;  ++i)
+		A[i] = new int[3];
+
+
+	for (int c = 0; c < E; ++c)
 	{
-		int j = 0;
-		for (int i = 0; i < n; i++)
-		{
-			e[j].v1 =  A[i++];
-			e[j].v2 =  A[i++];
-			e[j].w  =  A[i++];
-			e[j].s  =  A[i];
-			
-			j++;
-		}
-		cout << "Rank: " <<  rankn << endl ;
+	
+		infile >> A[c][0];	// v1
+		infile >> A[c][1];	// v2
+		infile >> A[c][2];	// wight
+	
+	}
+	infile.close();
+}
+/**************************************************************************************************/
+/* The MST function :) */
+void MST(int ** A, int V, int E, int * &TheMST, int &MSTcount, int rankn, int p, MPI_Comm comm)
+{
+	int sizep	= V/p;
+	int startp 	= sizep*rankn;
+	int endp 	= startp + sizep;
+	TheMST = new int[V*2];
+	int * minset = new int[V];
+	int * minset2 = new int[sizep];
+	int * pointlist = new int[V];
 
-		int iofe = 0;
-		int c=0;
-		for (c = 0; c < 9; c++)
-		{
-			int minv = 99999;
-			cout << "Vertex : "<< c <<endl; 
-			for (int i = 0; i < n/4; i++)
+    for (int v = 0; v < V; ++v)
+		pointlist[v] = v;
+ 
+    int numTrees = V;
+    int MSTweight = 0;	// For debug
+    while (numTrees > 1)
+    {
+		// set minset to empty
+		for (int v = 0; v < V; ++v)
+				minset[v] = -1;
+
+		for (int i=0; i<sizep; ++i)
+			minset2[i] = -1;
+		/*----------------------------------------------*/
+        for (int i=0; i<E; i++)
+        {
+            int set1 = findp(pointlist, A[i][0]);
+            int set2 = findp(pointlist, A[i][1]);
+ 
+            if (set1 != set2)
 			{
-				if ( (e[i].v1 == c ) || (e[i].v2 == c ) )
+				if (set1 >= startp && set1 < endp)
 				{
-					int x=0;
-					for (x=0; AM[e[i].v1][x] >= 0; x++ );
-					AM[ e[i].v1][x++] = e[i].v2; 
-					AM[ e[i].v1][x] = e[i].w; 
-
-					for (x=0; AM[e[i].v2][x] >= 0; x++ );
-					AM[ e[i].v2][x++] = e[i].v2; 
-					AM[ e[i].v2][x] = e[i].w; 
-
-
-					if (e[i].w < minv) 
-					{
-						minv = e[i].w;
-						iofe = i;
-					}
-//					cout << "\t Wight :" << e[i].w   << " - ";
-//					cout << 		e[i].s   << " ";
-//					cout << "\t" << e[i].v1 << " - " ;
-//					cout << 		e[i].v2  << " ";
-//					cout <<  endl;
+					if (minset2[set1%sizep] == -1 || A[minset2[set1%sizep]][2] > A[i][2])
+						minset2[set1%sizep] = i;
+				}	
+				if (set2 >= startp && set2 < endp)
+				{
+					if (minset2[set2%sizep] == -1 || A[minset2[set2%sizep]][2] > A[i][2])
+						minset2[set2%sizep] = i;
 				}
-
-				
 			}
-//			cout << "\t The min wight is :" << e[iofe].w   << " - ";
-//			cout << "\t" << e[iofe].v1 << " - " ;
-//			cout << 		e[iofe].v2  << " ";
-//			mste[c] = e[iofe];
-//			cout <<  endl;
-//			cout <<  endl;
-		}
-//
-//	printEdg(mste, c);
-//
-		cout << endl;
-
-	for (int i=0; i < SIZEV; i++)
-	{
-		if (AM[i][0] >=  0 )
-		cout << " " << i << " -> " ;
-		for (int j=0; j < MAXV; j++)
+        }
+		/*----------------------------------------------*/
+		MPI_Gather(minset2, sizep, MPI_INT, minset, sizep, MPI_INT, 0, comm);
+		MPI_Barrier(comm);
+		/*----------------------------------------------*/
+ 		if(!rankn)
 		{
-			if (AM[i][j]>=0)cout << AM[i][j] << " ";
-			if (AM[i][j] < 0 ) break;
+
+        	for (int i=0; i<V; i++)
+        	{
+        	    if (minset[i] != -1)
+        	    {
+        	        int set1 = findp(pointlist, A[minset[i]][0]);
+        	        int set2 = findp(pointlist, A[minset[i]][1]);
+ 
+        	        if (set1 != set2)
+					{
+						if (debug) MSTweight += A[minset[i]][2];
+						TheMST[MSTcount++] = A[minset[i]][0]; 
+						TheMST[MSTcount++] = A[minset[i]][1]; 
+						Union(pointlist, set1, set2, numTrees);
+					}
+        	    }
+        	}
 		}
-		if (AM[i][0] >=  0 )
-		cout << endl;
-	}
-	cout << endl;
+		MPI_Bcast(&numTrees, 1, MPI_INT, 0, comm);
+		MPI_Bcast(pointlist, V, MPI_INT, 0, comm);
+    }
+ 
+    if (debug) cout << "Weight of MST is " << MSTweight << endl;
+	if(!rankn)
 
-	}
-	delete[] mste;
-	delete[] e;
-} 
-void printEdg(Edge* e, int n)
+	if (debug)	printA(TheMST, MSTcount);
+	delete [] pointlist;
+}
+/**************************************************************************************************/
+/* Find the perent of node */
+int findp(int * s, int i)
 {
+    if (s[i] != i)
+		s[i] = findp(s, s[i]);
+ 
+    return s[i];
+}
+/**************************************************************************************************/
+/* Union 2 vertises */
+void Union(int* s, int x, int y, int & numTrees)
+{
+    int xroot = findp(s, x);
+    int yroot = findp(s, y);
+ 
+    s[yroot] = xroot;
 
-	cout << "########################################" << endl;
-	for (int i = 0; i < n; i++)
+	numTrees--;
+}
+/**************************************************************************************************/
+/* print array for testing only  */
+void printA(int *e, int E)
+{
+	if (e == NULL) return;
+
+	for (int i = 0; i < E; i++)
 	{
-	    cout << "\t Wight :" << e[i].w   << " - ";
-	    cout << 		e[i].s   << " ";
-	    cout << "\t" << e[i].v1 << " - " ;
-	    cout << 		e[i].v2  << " ";
+	    cout << 		e[i++]  << " - ";
+	    cout << 		e[i] ;
 	    cout <<  endl;
 	}
 	cout <<  endl;
